@@ -1,0 +1,17 @@
+version: 2
+ethernets:
+  eth0:
+    match:
+      macaddress: "06:52:db:01:ff:d9"
+    addresses:
+      - "192.168.1.10/24"
+    gateway4: "192.168.1.1"
+    nameservers:
+      addresses:
+      - "8.8.8.8"
+      - "8.8.4.4"
+  eth1:
+    match:
+      macaddress: "06:f6:71:3b:64:01"
+    dhcp4: true
+

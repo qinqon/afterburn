@@ -50,7 +50,9 @@ The following platforms are supported, with a different set of features availabl
   - Attributes
 * kubevirt
   - Attributes
+  - Hostname
   - SSH Keys
+  - Network configuration
 * openstack
   * Metadata source: config-drive if present, otherwise metadata service
   * Features:

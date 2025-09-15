@@ -1,5 +1,5 @@
 [Unit]
-Description=Afterburn Initrd Setup Network Kernel Arguments
+Description=[FOO] Afterburn Initrd Setup Network Kernel Arguments
 Documentation=https://coreos.github.io/afterburn/usage/initrd-network-cmdline/
 
 # This service may produce additional kargs fragments,
