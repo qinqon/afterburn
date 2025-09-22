@@ -370,7 +370,20 @@ impl KubeVirtProvider {
 impl MetadataProvider for KubeVirtProvider {
     fn attributes(&self) -> Result<HashMap<String, String>> {
         let metadata = self.read_metadata()?;
-        Self::known_attributes(metadata)
+        let mut out = Self::known_attributes(metadata)?;
+
+        if let Some(first_interface) = self.networks()?.first() {
+            first_interface.ip_addresses.iter().for_each(|ip| match ip {
+                IpNetwork::V4(network) => {
+                    out.insert("KUBEVIRT_IPV4".to_owned(), network.ip().to_string());
+                }
+                IpNetwork::V6(network) => {
+                    out.insert("KUBEVIRT_IPV6".to_owned(), network.ip().to_string());
+                }
+            });
+        }
+
+        Ok(out)
     }
 
     fn hostname(&self) -> Result<Option<String>> {
