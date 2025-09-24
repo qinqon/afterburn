@@ -60,38 +60,72 @@ fn test_network_data() {
             );
             assert_eq!(
                 interfaces[eth0_idx].ip_addresses.len(),
-                1,
+                2,
                 "{}",
                 fixture_path
             );
-            assert_eq!(
-                interfaces[eth0_idx].ip_addresses[0],
-                IpNetwork::from_str("192.168.1.10/24").unwrap(),
+            assert!(
+                interfaces[eth0_idx]
+                    .ip_addresses
+                    .contains(&IpNetwork::from_str("192.168.1.10/24").unwrap()),
                 "{}",
                 fixture_path
             );
-            assert_eq!(interfaces[eth0_idx].routes.len(), 1, "{}", fixture_path);
-            assert_eq!(
-                interfaces[eth0_idx].routes[0].gateway,
-                IpAddr::from_str("192.168.1.1").unwrap(),
+            assert!(
+                interfaces[eth0_idx]
+                    .ip_addresses
+                    .contains(&IpNetwork::from_str("2001:db8::10/64").unwrap()),
+                "{}",
+                fixture_path
+            );
+            assert_eq!(interfaces[eth0_idx].routes.len(), 2, "{}", fixture_path);
+            assert!(
+                interfaces[eth0_idx]
+                    .routes
+                    .iter()
+                    .any(|r| r.gateway == IpAddr::from_str("192.168.1.1").unwrap()),
+                "{}",
+                fixture_path
+            );
+            assert!(
+                interfaces[eth0_idx]
+                    .routes
+                    .iter()
+                    .any(|r| r.gateway == IpAddr::from_str("2001:db8::1").unwrap()),
                 "{}",
                 fixture_path
             );
             assert_eq!(
                 interfaces[eth0_idx].nameservers.len(),
-                2,
+                4,
                 "{}",
                 fixture_path
             );
-            assert_eq!(
-                interfaces[eth0_idx].nameservers[0],
-                IpAddr::from_str("8.8.8.8").unwrap(),
+            assert!(
+                interfaces[eth0_idx]
+                    .nameservers
+                    .contains(&IpAddr::from_str("8.8.8.8").unwrap()),
                 "{}",
                 fixture_path
             );
-            assert_eq!(
-                interfaces[eth0_idx].nameservers[1],
-                IpAddr::from_str("8.8.4.4").unwrap(),
+            assert!(
+                interfaces[eth0_idx]
+                    .nameservers
+                    .contains(&IpAddr::from_str("8.8.4.4").unwrap()),
+                "{}",
+                fixture_path
+            );
+            assert!(
+                interfaces[eth0_idx]
+                    .nameservers
+                    .contains(&IpAddr::from_str("2001:4860:4860::8888").unwrap()),
+                "{}",
+                fixture_path
+            );
+            assert!(
+                interfaces[eth0_idx]
+                    .nameservers
+                    .contains(&IpAddr::from_str("2001:4860:4860::8844").unwrap()),
                 "{}",
                 fixture_path
             );
@@ -103,7 +137,7 @@ fn test_network_data() {
             );
             assert_eq!(
                 interfaces[eth1_idx].dhcp,
-                Some(DhcpSetting::V4),
+                Some(DhcpSetting::Both),
                 "{}",
                 fixture_path
             );
@@ -121,15 +155,22 @@ fn test_network_data() {
             );
             let kargs = config.rd_network_kargs().unwrap().unwrap();
             let kargs_parts: Vec<&str> = kargs.split_whitespace().collect();
-            assert_eq!(kargs_parts.len(), 3, "{}", fixture_path);
-            assert!(kargs.contains("ip=eth1:dhcp"), "{}", fixture_path);
+            assert_eq!(kargs_parts.len(), 4, "{}", fixture_path);
+            assert!(kargs.contains("ip=eth1:dhcp,dhcp6"), "{}", fixture_path);
             assert!(
                 kargs.contains("ip=192.168.1.10::192.168.1.1:255.255.255.0::eth0:static"),
                 "{}",
                 fixture_path
             );
             assert!(
-                kargs.contains("nameserver=8.8.8.8,8.8.4.4"),
+                kargs.contains("ip=2001:db8::10::2001:db8::1:64::eth0:static"),
+                "{}",
+                fixture_path
+            );
+            assert!(
+                kargs.contains(
+                    "nameserver=8.8.8.8,8.8.4.4,2001:4860:4860::8888,2001:4860:4860::8844"
+                ),
                 "{}",
                 fixture_path
             );
@@ -137,6 +178,12 @@ fn test_network_data() {
             assert_eq!(
                 attrs.get("KUBEVIRT_IPV4"),
                 Some(&"192.168.1.10".to_string()),
+                "{}",
+                fixture_path
+            );
+            assert_eq!(
+                attrs.get("KUBEVIRT_IPV6"),
+                Some(&"2001:db8::10".to_string()),
                 "{}",
                 fixture_path
             );
