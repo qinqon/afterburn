@@ -11,8 +11,15 @@
 //!
 //! configdrive: https://cloudinit.readthedocs.io/en/latest/topics/datasources/configdrive.html
 
-use crate::{network, providers::MetadataProvider};
+use crate::{
+    network::{DhcpSetting, Interface, VirtualNetDev},
+    providers::{
+        kubevirt::networkdata::{network_interfaces, NetworkData, NetworkDataV1, NetworkDataV2},
+        MetadataProvider,
+    },
+};
 use anyhow::{bail, Context, Result};
+use ipnetwork::IpNetwork;
 use openssh_keys::PublicKey;
 use serde::Deserialize;
 use slog_scope::warn;
@@ -40,25 +47,107 @@ pub struct MetaDataJSON {
 #[derive(Debug)]
 pub struct KubeVirtCloudConfig {
     pub meta_data: MetaDataJSON,
+    pub network_data: Option<NetworkData>,
 }
 
 impl KubeVirtCloudConfig {
     pub fn try_new(path: &Path) -> Result<Self> {
-        let metadata_dir = path.join("openstack").join("latest");
-        let filename = metadata_dir.join("meta_data.json");
+        let meta_data = match Self::read_cloud_config_file(path, "meta_data.json")? {
+            Some(reader) => Self::parse_metadata(reader)?,
+            None => bail!("meta_data.json file not found"),
+        };
+
+        let network_data = Self::read_cloud_config_file(path, "network_data.json")?
+            .map(Self::parse_network_data)
+            .transpose()?;
+
+        Ok(Self {
+            meta_data,
+            network_data,
+        })
+    }
+    pub fn read_cloud_config_file(path: &Path, file: &str) -> Result<Option<BufReader<File>>> {
+        let cloudconfig_dir = path.join("openstack").join("latest");
+        let filename = cloudconfig_dir.join(file);
+        if !filename.exists() {
+            return Ok(None);
+        }
         let file =
             File::open(&filename).with_context(|| format!("failed to open file '{filename:?}'"))?;
-        let bufrd = BufReader::new(file);
-        let meta_data = Self::parse_metadata(bufrd)?;
-
-        Ok(Self { meta_data })
+        Ok(Some(BufReader::new(file)))
     }
 
     /// Parse metadata attributes.
     ///
     /// Metadata file contains a JSON object, corresponding to `MetaDataJSON`.
-    pub fn parse_metadata<T: Read>(input: BufReader<T>) -> Result<MetaDataJSON> {
+    pub fn parse_metadata(input: BufReader<File>) -> Result<MetaDataJSON> {
         serde_json::from_reader(input).context("failed to parse JSON metadata")
+    }
+
+    /// Parse network configuration.
+    ///
+    /// Network configuration file contains a JSON or YAML object, corresponding to `NetworkData`.
+    /// Supports both cloud-init network data version 1 and version 2 formats with automatic
+    /// version detection. The parser first determines the format (JSON vs YAML), then detects
+    /// the version number to use the appropriate data structures.
+    ///
+    /// # Supported Formats
+    /// - **JSON and YAML**: Both input formats are supported for both versions
+    /// - **Version 1**: Legacy flat config array format
+    /// - **Version 2**: Modern structured format with ethernets section
+    ///
+    /// # Version Detection
+    /// The version is extracted from the parsed content. If no version is specified,
+    /// defaults to version 1 for backward compatibility.
+    fn parse_network_data(mut input: BufReader<File>) -> Result<NetworkData> {
+        let mut content = String::new();
+        input
+            .read_to_string(&mut content)
+            .context("failed to read network data content")?;
+
+        let trimmed_content = content.trim();
+
+        // Parse as either JSON or YAML to get a generic Value first for version detection
+        // This two-step approach allows us to inspect the version field before committing
+        // to a specific data structure for deserialization
+        let parsed_value: serde_json::Value =
+            if trimmed_content.starts_with('{') || trimmed_content.starts_with('[') {
+                // Try JSON first - most common format
+                serde_json::from_str(&content).context("failed to parse JSON network data")?
+            } else {
+                // Try YAML and convert to JSON Value for uniform processing
+                let yaml_value: serde_yaml::Value =
+                    serde_yaml::from_str(&content).context("failed to parse YAML network data")?;
+                serde_json::to_value(yaml_value)
+                    .context("failed to convert YAML to JSON for processing")?
+            };
+
+        // Extract version to determine parsing strategy
+        // Default to version 1 if not specified (backward compatibility)
+        let version = parsed_value
+            .get("version")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as u32;
+
+        // Parse according to detected version using appropriate data structures
+        match version {
+            1 => {
+                // Cloud-init network data v1: flat config array with type-based entries
+                let v1_data: NetworkDataV1 = serde_json::from_value(parsed_value)
+                    .context("failed to parse version 1 network data")?;
+                Ok(NetworkData::V1(v1_data))
+            }
+            2 => {
+                // Cloud-init network data v2: structured format with ethernets section
+                let v2_data: NetworkDataV2 = serde_json::from_value(parsed_value)
+                    .context("failed to parse version 2 network data")?;
+                Ok(NetworkData::V2(v2_data))
+            }
+            _ => Err(anyhow::anyhow!(
+                "unsupported network data version: {}",
+                version
+            )),
+        }
     }
 }
 
@@ -106,12 +195,108 @@ impl MetadataProvider for KubeVirtCloudConfig {
             .collect()
     }
 
-    fn networks(&self) -> Result<Vec<network::Interface>> {
-        warn!("network interfaces metadata requested, but not supported on this platform");
-        Ok(vec![])
+    fn networks(&self) -> Result<Vec<Interface>> {
+        match &self.network_data {
+            Some(network_data) => network_interfaces(network_data),
+            None => Ok(Vec::<Interface>::new()),
+        }
     }
 
-    fn virtual_network_devices(&self) -> Result<Vec<network::VirtualNetDev>> {
+    fn rd_network_kargs(&self) -> Result<Option<String>> {
+        let mut kargs = Vec::new();
+
+        if let Ok(networks) = self.networks() {
+            for iface in networks {
+                // Use mac address as identifier if there is one
+                // else us name or continue
+                let id = if let Some(iface_mac) = iface.mac_address {
+                    format!("{}", iface_mac)
+                } else if let Some(iface_name) = iface.name {
+                    iface_name
+                } else {
+                    continue;
+                };
+
+                // Add IP configuration if static
+                for addr in iface.ip_addresses {
+                    match addr {
+                        IpNetwork::V4(network) => {
+                            if let Some(gateway) = iface
+                                .routes
+                                .iter()
+                                .find(|r| r.destination.is_ipv4() && r.destination.prefix() == 0)
+                            {
+                                kargs.push(format!(
+                                    "ip={}::{}:{}::{}:static",
+                                    network.ip(),
+                                    gateway.gateway,
+                                    network.mask(),
+                                    id,
+                                ));
+                            } else {
+                                kargs.push(format!(
+                                    "ip={}:::{}::{}:static",
+                                    network.ip(),
+                                    network.mask(),
+                                    id
+                                ));
+                            }
+                        }
+                        IpNetwork::V6(network) => {
+                            if let Some(gateway) = iface
+                                .routes
+                                .iter()
+                                .find(|r| r.destination.is_ipv6() && r.destination.prefix() == 0)
+                            {
+                                kargs.push(format!(
+                                    "ip={}::{}:{}::{}:static",
+                                    network.ip(),
+                                    gateway.gateway,
+                                    network.prefix(),
+                                    id
+                                ));
+                            } else {
+                                kargs.push(format!(
+                                    "ip={}:::{}::{}:static",
+                                    network.ip(),
+                                    network.prefix(),
+                                    id
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                // Add DHCP configuration
+                if let Some(dhcp) = iface.dhcp {
+                    match dhcp {
+                        DhcpSetting::V4 => kargs.push(format!("ip={}:dhcp", id)),
+                        DhcpSetting::V6 => kargs.push(format!("ip={}:dhcp6", id)),
+                        DhcpSetting::Both => kargs.push(format!("ip={}:dhcp,dhcp6", id)),
+                    }
+                }
+
+                // Add nameservers
+                if !iface.nameservers.is_empty() {
+                    let nameservers = iface
+                        .nameservers
+                        .iter()
+                        .map(|ns| ns.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    kargs.push(format!("nameserver={}", nameservers));
+                }
+            }
+        }
+
+        if kargs.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(kargs.join(" ")))
+        }
+    }
+
+    fn virtual_network_devices(&self) -> Result<Vec<VirtualNetDev>> {
         warn!("virtual network devices metadata requested, but not supported on this platform");
         Ok(vec![])
     }

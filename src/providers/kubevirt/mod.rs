@@ -23,6 +23,8 @@ pub use configdrive::*;
 mod cloudconfig;
 pub use cloudconfig::*;
 
+mod networkdata;
+
 #[cfg(test)]
 mod tests;
 

@@ -74,6 +74,10 @@ impl MetadataProvider for KubeVirtConfigDrive {
         self.config.networks()
     }
 
+    fn rd_network_kargs(&self) -> Result<Option<String>> {
+        self.config.rd_network_kargs()
+    }
+
     fn virtual_network_devices(&self) -> Result<Vec<network::VirtualNetDev>> {
         self.config.virtual_network_devices()
     }
