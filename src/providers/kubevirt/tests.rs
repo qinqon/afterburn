@@ -133,6 +133,13 @@ fn test_network_data() {
                 "{}",
                 fixture_path
             );
+            let attrs = config.attributes().expect(&fixture_path);
+            assert_eq!(
+                attrs.get("KUBEVIRT_IPV4"),
+                Some(&"192.168.1.10".to_string()),
+                "{}",
+                fixture_path
+            );
         }
     }
 }

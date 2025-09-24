@@ -169,9 +169,33 @@ impl MetadataProvider for KubeVirtCloudConfig {
             "KUBEVIRT_INSTANCE_ID".to_string() => self.meta_data.instance_id.clone(),
             "KUBEVIRT_HOSTNAME".to_string() => self.meta_data.hostname.clone(),
         };
+
         if let Some(instance_type) = &self.meta_data.instance_type {
             attrs.insert("KUBEVIRT_INSTANCE_TYPE".to_string(), instance_type.clone());
         }
+
+        if let Some(interface_with_ips) = self
+            .networks()?
+            .iter()
+            .find(|iface| !iface.ip_addresses.is_empty())
+        {
+            interface_with_ips
+                .ip_addresses
+                .iter()
+                .for_each(|ip| match ip {
+                    IpNetwork::V4(network) => {
+                        attrs
+                            .entry("KUBEVIRT_IPV4".to_owned())
+                            .or_insert_with(|| network.ip().to_string());
+                    }
+                    IpNetwork::V6(network) => {
+                        attrs
+                            .entry("KUBEVIRT_IPV6".to_owned())
+                            .or_insert_with(|| network.ip().to_string());
+                    }
+                });
+        }
+
         Ok(attrs)
     }
 
