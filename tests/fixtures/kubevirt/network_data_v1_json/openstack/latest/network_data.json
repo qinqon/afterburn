@@ -32,6 +32,16 @@
       ]
     },
     {
+      "type": "physical",
+      "name": "eth2",
+      "mac_address": "06:aa:bb:cc:dd:02",
+      "subnets": [
+        {
+          "type": "dhcp"
+        }
+      ]
+    },
+    {
       "type": "nameserver",
       "address": [
         "8.8.8.8",

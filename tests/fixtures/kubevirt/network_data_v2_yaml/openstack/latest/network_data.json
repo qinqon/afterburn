@@ -15,4 +15,8 @@ ethernets:
   eth1:
     dhcp4: true
     dhcp6: true
+  eth2:
+    match:
+      macaddress: "06:aa:bb:cc:dd:02"
+    dhcp4: true
 

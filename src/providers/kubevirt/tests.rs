@@ -3,7 +3,6 @@ use crate::network::DhcpSetting;
 use crate::providers::MetadataProvider;
 
 use ipnetwork::IpNetwork;
-use pnet_base::MacAddr;
 use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
@@ -46,117 +45,92 @@ fn test_network_data() {
             let config = KubeVirtCloudConfig::try_new(fixture).expect(&fixture_path);
             let interfaces = config.networks().expect(&fixture_path);
 
-            assert_eq!(interfaces.len(), 2, "{}", fixture_path);
-            let (eth0_idx, eth1_idx) = if interfaces[0].name == Some("eth0".to_string()) {
-                (0, 1)
-            } else {
-                (1, 0)
-            };
-            assert_eq!(
-                interfaces[eth0_idx].name,
-                Some("eth0".to_string()),
-                "{}",
-                fixture_path
-            );
-            assert_eq!(
-                interfaces[eth0_idx].ip_addresses.len(),
-                2,
-                "{}",
-                fixture_path
-            );
+            assert_eq!(interfaces.len(), 3, "{}", fixture_path);
+            let mut eth0 = None;
+            let mut eth1 = None;
+            let mut eth2 = None;
+            for interface in interfaces.iter() {
+                match interface.name.as_deref() {
+                    Some("eth0") => eth0 = Some(interface),
+                    Some("eth1") => eth1 = Some(interface),
+                    Some("eth2") => eth2 = Some(interface),
+                    _ => {}
+                }
+            }
+            let eth0 = eth0.expect("eth0 interface not found");
+            let eth1 = eth1.expect("eth1 interface not found");
+            let eth2 = eth2.expect("eth2 interface not found");
+            assert_eq!(eth0.name, Some("eth0".to_string()), "{}", fixture_path);
+            assert_eq!(eth0.ip_addresses.len(), 2, "{}", fixture_path);
             assert!(
-                interfaces[eth0_idx]
-                    .ip_addresses
+                eth0.ip_addresses
                     .contains(&IpNetwork::from_str("192.168.1.10/24").unwrap()),
                 "{}",
                 fixture_path
             );
             assert!(
-                interfaces[eth0_idx]
-                    .ip_addresses
+                eth0.ip_addresses
                     .contains(&IpNetwork::from_str("2001:db8::10/64").unwrap()),
                 "{}",
                 fixture_path
             );
-            assert_eq!(interfaces[eth0_idx].routes.len(), 2, "{}", fixture_path);
+            assert_eq!(eth0.routes.len(), 2, "{}", fixture_path);
             assert!(
-                interfaces[eth0_idx]
-                    .routes
+                eth0.routes
                     .iter()
                     .any(|r| r.gateway == IpAddr::from_str("192.168.1.1").unwrap()),
                 "{}",
                 fixture_path
             );
             assert!(
-                interfaces[eth0_idx]
-                    .routes
+                eth0.routes
                     .iter()
                     .any(|r| r.gateway == IpAddr::from_str("2001:db8::1").unwrap()),
                 "{}",
                 fixture_path
             );
-            assert_eq!(
-                interfaces[eth0_idx].nameservers.len(),
-                4,
-                "{}",
-                fixture_path
-            );
+            assert_eq!(eth0.nameservers.len(), 4, "{}", fixture_path);
             assert!(
-                interfaces[eth0_idx]
-                    .nameservers
+                eth0.nameservers
                     .contains(&IpAddr::from_str("8.8.8.8").unwrap()),
                 "{}",
                 fixture_path
             );
             assert!(
-                interfaces[eth0_idx]
-                    .nameservers
+                eth0.nameservers
                     .contains(&IpAddr::from_str("8.8.4.4").unwrap()),
                 "{}",
                 fixture_path
             );
             assert!(
-                interfaces[eth0_idx]
-                    .nameservers
+                eth0.nameservers
                     .contains(&IpAddr::from_str("2001:4860:4860::8888").unwrap()),
                 "{}",
                 fixture_path
             );
             assert!(
-                interfaces[eth0_idx]
-                    .nameservers
+                eth0.nameservers
                     .contains(&IpAddr::from_str("2001:4860:4860::8844").unwrap()),
                 "{}",
                 fixture_path
             );
-            assert_eq!(
-                interfaces[eth1_idx].name,
-                Some("eth1".to_string()),
-                "{}",
-                fixture_path
-            );
-            assert_eq!(
-                interfaces[eth1_idx].dhcp,
-                Some(DhcpSetting::Both),
-                "{}",
-                fixture_path
-            );
-            assert_eq!(
-                interfaces[eth1_idx].ip_addresses.len(),
-                0,
-                "{}",
-                fixture_path
-            );
-            assert_eq!(
-                interfaces[eth1_idx].nameservers.len(),
-                0,
-                "{}",
-                fixture_path
-            );
+            assert_eq!(eth1.name, Some("eth1".to_string()), "{}", fixture_path);
+            assert_eq!(eth1.dhcp, Some(DhcpSetting::Both), "{}", fixture_path);
+            assert_eq!(eth1.ip_addresses.len(), 0, "{}", fixture_path);
+            assert_eq!(eth1.nameservers.len(), 0, "{}", fixture_path);
+            assert_eq!(eth2.name, Some("eth2".to_string()), "{}", fixture_path);
+            assert_eq!(eth2.dhcp, Some(DhcpSetting::V4), "{}", fixture_path);
+            assert_eq!(eth2.ip_addresses.len(), 0, "{}", fixture_path);
+            assert_eq!(eth2.nameservers.len(), 0, "{}", fixture_path);
             let kargs = config.rd_network_kargs().unwrap().unwrap();
             let kargs_parts: Vec<&str> = kargs.split_whitespace().collect();
-            assert_eq!(kargs_parts.len(), 4, "{}", fixture_path);
+            assert_eq!(kargs_parts.len(), 5, "{}", fixture_path);
             assert!(kargs.contains("ip=eth1:dhcp,dhcp6"), "{}", fixture_path);
+            assert!(
+                kargs.contains("ip=06:aa:bb:cc:dd:02:dhcp"),
+                "{}",
+                fixture_path
+            );
             assert!(
                 kargs.contains("ip=192.168.1.10::192.168.1.1:255.255.255.0::eth0:static"),
                 "{}",
